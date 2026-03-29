@@ -20,3 +20,6 @@ eyre.workspace = true
 base-proof-tee-nitro-enclave.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
+[package.metadata.cargo-udeps.ignore]
+# Enclave binary: `cargo-udeps` depinfo can miss `main.rs` when the workspace is checked from non-Linux hosts.
+normal = ["base-proof-tee-nitro-enclave", "eyre", "tokio"]
