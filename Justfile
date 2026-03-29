@@ -224,6 +224,34 @@ check-udeps: build-contracts
     @command -v cargo-udeps >/dev/null 2>&1 || cargo install cargo-udeps
     {{_skip_kernels}} cargo +nightly udeps --locked --workspace --all-features --all-targets
 
+# Same flags as `check-udeps`, scoped to `crates/execution/*` workspace packages (library names).
+check-udeps-execution: build-contracts
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo-udeps >/dev/null 2>&1 || cargo install cargo-udeps
+    pkgs=(
+        base-engine-tree base-execution-chainspec base-execution-cli base-execution-consensus
+        base-execution-evm base-execution-exex base-execution-forks base-execution-payload-builder
+        base-execution-primitives base-execution-rpc base-execution-storage base-execution-trie
+        base-flashblocks base-node-core base-node-runner base-revm base-txpool-rpc
+    )
+    args=()
+    for p in "${pkgs[@]}"; do args+=(-p "$p"); done
+    {{_skip_kernels}} cargo +nightly udeps --locked --all-features --all-targets "${args[@]}"
+
+# Same flags as `check-udeps`, scoped to `crates/client/*` workspace packages (library names).
+check-udeps-client: build-contracts
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo-udeps >/dev/null 2>&1 || cargo install cargo-udeps
+    pkgs=(
+        base-bundle-extension base-client-cli base-flashblocks-node base-metering
+        base-proofs-extension base-tx-forwarding base-txpool-tracing
+    )
+    args=()
+    for p in "${pkgs[@]}"; do args+=(-p "$p"); done
+    {{_skip_kernels}} cargo +nightly udeps --locked --all-features --all-targets "${args[@]}"
+
 # Checks crate dependency boundary rules
 check-crate-deps:
     ./etc/scripts/ci/check-crate-deps.sh
