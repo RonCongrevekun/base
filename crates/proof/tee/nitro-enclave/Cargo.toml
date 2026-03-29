@@ -65,4 +65,6 @@ base-consensus-registry.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [package.metadata.cargo-udeps.ignore]
-normal = ["aws-nitro-enclaves-nsm-api"]
+# `aws-nitro-enclaves-nsm-api`: linked for NSM; depinfo can miss FFI.
+# `eyre`: used in `runtime` behind `cfg(target_os = "linux")`; depinfo on macOS/CI hosts misses it.
+normal = ["aws-nitro-enclaves-nsm-api", "eyre"]
