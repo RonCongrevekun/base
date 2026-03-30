@@ -8,6 +8,7 @@
 #![cfg_attr(target_arch = "mips64", feature(asm_experimental_arch))]
 #![cfg_attr(any(target_arch = "mips64", target_arch = "riscv64"), no_std)]
 
+#[cfg(any(target_arch = "mips64", target_arch = "riscv64", feature = "tracing"))]
 extern crate alloc;
 
 pub mod errors;
