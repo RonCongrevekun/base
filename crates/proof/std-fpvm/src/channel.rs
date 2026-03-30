@@ -1,14 +1,10 @@
 //! This module contains a rudimentary channel between two file descriptors, using [`crate::io`]
 //! for reading and writing from the file descriptors.
-
-use alloc::boxed::Box;
-use core::{
-    cell::RefCell,
-    cmp::Ordering,
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+//!
+//! [`read_exact`](FileChannel::read_exact) and [`write`](FileChannel::write) use synchronous
+//! `io::read` / `io::write` loops inside `async fn` bodies with no `.await`. The resulting
+//! futures complete on the first poll, matching the FPVM blocking syscall model and avoiding
+//! `wake_by_ref` busy-wait loops that would spin the async executor.
 
 use async_trait::async_trait;
 use base_proof_preimage::{
@@ -51,97 +47,29 @@ impl Channel for FileChannel {
     }
 
     async fn read_exact(&self, buf: &mut [u8]) -> ChannelResult<usize> {
-        ReadFuture::new(*self, buf).await.map_err(|_| ChannelError::Closed)
+        let mut total = 0;
+        while total < buf.len() {
+            let n =
+                io::read(self.read_handle, &mut buf[total..]).map_err(|_| ChannelError::Closed)?;
+            if n == 0 {
+                return Err(ChannelError::Closed);
+            }
+            total += n;
+        }
+        Ok(total)
     }
 
     async fn write(&self, buf: &[u8]) -> ChannelResult<usize> {
-        WriteFuture::new(*self, buf).await.map_err(|_| ChannelError::Closed)
-    }
-}
-
-/// A future that reads from a channel, returning [`Poll::Ready`] when the buffer is full.
-struct ReadFuture<'a> {
-    /// The channel to read from
-    channel: FileChannel,
-    /// The buffer to read into
-    buf: RefCell<&'a mut [u8]>,
-    /// The number of bytes read so far
-    read: usize,
-}
-
-impl<'a> ReadFuture<'a> {
-    /// Create a new [`ReadFuture`] from a channel and a buffer.
-    #[allow(clippy::missing_const_for_fn)]
-    fn new(channel: FileChannel, buf: &'a mut [u8]) -> Self {
-        Self { channel, buf: RefCell::new(buf), read: 0 }
-    }
-}
-
-impl Future for ReadFuture<'_> {
-    type Output = ChannelResult<usize>;
-
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut buf = self.buf.borrow_mut();
-        let buf_len = buf.len();
-        let chunk_read = io::read(self.channel.read_handle, &mut buf[self.read..])
-            .map_err(|_| ChannelError::Closed)?;
-
-        // Drop the borrow on self.
-        drop(buf);
-
-        self.read += chunk_read;
-
-        match self.read.cmp(&buf_len) {
-            Ordering::Greater | Ordering::Equal => Poll::Ready(Ok(self.read)),
-            Ordering::Less => {
-                // Register the current task to be woken up when it can make progress
-                ctx.waker().wake_by_ref();
-                Poll::Pending
+        let mut written = 0;
+        while written < buf.len() {
+            let n =
+                io::write(self.write_handle, &buf[written..]).map_err(|_| ChannelError::Closed)?;
+            if n == 0 {
+                return Err(ChannelError::Closed);
             }
+            written += n;
         }
-    }
-}
-
-/// A future that writes to a channel, returning [`Poll::Ready`] when the full buffer has been
-/// written.
-struct WriteFuture<'a> {
-    /// The channel to write to
-    channel: FileChannel,
-    /// The buffer to write
-    buf: &'a [u8],
-    /// The number of bytes written so far
-    written: usize,
-}
-
-impl<'a> WriteFuture<'a> {
-    /// Create a new [`WriteFuture`] from a channel and a buffer.
-    const fn new(channel: FileChannel, buf: &'a [u8]) -> Self {
-        Self { channel, buf, written: 0 }
-    }
-}
-
-impl Future for WriteFuture<'_> {
-    type Output = ChannelResult<usize>;
-
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        match io::write(self.channel.write_handle(), &self.buf[self.written..]) {
-            Ok(n) => {
-                self.written += n;
-
-                match self.written.cmp(&self.buf.len()) {
-                    Ordering::Equal | Ordering::Greater => {
-                        // Finished writing
-                        Poll::Ready(Ok(self.written))
-                    }
-                    Ordering::Less => {
-                        // Register the current task to be woken up when it can make progress
-                        ctx.waker().wake_by_ref();
-                        Poll::Pending
-                    }
-                }
-            }
-            Err(_) => Poll::Ready(Err(ChannelError::Closed)),
-        }
+        Ok(written)
     }
 }
 
